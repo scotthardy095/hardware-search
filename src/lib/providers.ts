@@ -74,13 +74,13 @@ async function searchBQMany(query: string, limit: number): Promise<ProviderResul
 
   // The Netlify function now returns properly formatted JSON, so we don't need HTML parsing
 
-  // Fallback: extract JSON substring from text/x-script response
-  const first = text.indexOf('{')
-  const last = text.lastIndexOf('}')
-  if (first === -1 || last === -1 || last <= first) throw new Error('B&Q: no JSON detected')
-  const jsonStr = text.slice(first, last + 1)
+  // Parse the complex B&Q array response format
   let data: any
-  try { data = JSON.parse(jsonStr) } catch { throw new Error('B&Q: parse error') }
+  try { 
+    data = JSON.parse(text) 
+  } catch { 
+    throw new Error('B&Q: parse error') 
+  }
 
   const arrays: any[] = []
   function collectArrays(node: any) {
@@ -89,25 +89,36 @@ async function searchBQMany(query: string, limit: number): Promise<ProviderResul
     else Object.values(node).forEach(collectArrays)
   }
   collectArrays(data)
+  console.log('B&Q: Found', arrays.length, 'arrays to search')
   const candidates: any[] = []
   for (const arr of arrays) {
-    const items = arr.filter((x: any) => x && (x.productUrl || x.url) && (x.title || x.name))
-    if (items.length >= 1) candidates.push(...items)
+    const items = arr.filter((x: any) => {
+      if (!x || typeof x !== 'object') return false
+      // Look for various product field combinations
+      const hasUrl = x.productUrl || x.url || x.link || x.href
+      const hasTitle = x.title || x.name || x.productName || x.displayName
+      return hasUrl && hasTitle
+    })
+    if (items.length >= 1) {
+      console.log('B&Q: Found', items.length, 'products in array')
+      candidates.push(...items)
+    }
   }
+  console.log('B&Q: Total candidates found:', candidates.length)
   const picked = (candidates.length ? candidates : [deepFindFirstProduct(data, ['productUrl', 'title'], ['url', 'name'])].filter(Boolean)).slice(0, limit)
   return picked.map((p: any) => {
-    const priceRaw = p?.price?.value ?? p?.price ?? p?.priceValue
-    let rawImg = p?.image || p?.imageUrl || p?.thumbnail || null
+    const priceRaw = p?.price?.value ?? p?.price ?? p?.priceValue ?? p?.currentPrice ?? p?.sellingPrice
+    let rawImg = p?.image || p?.imageUrl || p?.thumbnail || p?.imageSrc || null
     if (!rawImg) rawImg = findAnyImageUrl(p)
     const image = proxyIfNeeded(normalizeBqImageUrl(rawImg))
-    const productUrl = p?.productUrl || p?.url || null
+    const productUrl = p?.productUrl || p?.url || p?.link || p?.href || null
     const price = typeof priceRaw === 'number' ? priceRaw : (() => {
       const m = typeof priceRaw === 'string' ? priceRaw.match(/[0-9]+(\.[0-9]{1,2})?/) : null
       return m ? parseFloat(m[0]) : null
     })()
     return {
       retailer: 'B&Q' as Retailer,
-      title: p.title || p.name || 'Top result',
+      title: p.title || p.name || p.productName || p.displayName || 'Top result',
       price: Number.isFinite(price as number) ? (price as number) : null,
       url: productUrl ? ensureAbsolute(productUrl, 'https://www.diy.com') : null,
       imageUrl: image ?? null,
