@@ -1,10 +1,56 @@
 import type { Handler } from '@netlify/functions'
 
+// Parse the complex B&Q API response format
+function parseBqResponse(data: any): any[] {
+  const results: any[] = []
+  
+  // B&Q returns a complex array structure, we need to find the product data
+  function findProducts(obj: any): void {
+    if (!obj || typeof obj !== 'object') return
+    
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        if (item && typeof item === 'object') {
+          // Look for product-like objects
+          if (item.title || item.name) {
+            const product = {
+              title: item.title || item.name || 'Product',
+              url: item.url || item.detailPageUrl || item.productUrl || null,
+              imageUrl: item.image || item.imageUrl || item.thumbnail || null,
+              price: item.price || item.priceValue || null,
+            }
+            if (product.title && product.url) {
+              results.push(product)
+            }
+          }
+          findProducts(item)
+        }
+      }
+    } else {
+      for (const value of Object.values(obj)) {
+        findProducts(value)
+      }
+    }
+  }
+  
+  findProducts(data)
+  return results.slice(0, 50) // Limit to 50 results
+}
+
 export const handler: Handler = async (event) => {
   try {
     const term = (event.queryStringParameters?.term || '').toString().trim().slice(0, 64)
     if (!term) {
-      return { statusCode: 400, body: 'Missing term' }
+      return { 
+        statusCode: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        },
+        body: JSON.stringify({ error: 'Missing term parameter. Usage: /api/bq?term=search_term' })
+      }
     }
     
     // Try different B&Q API endpoints
@@ -45,6 +91,11 @@ export const handler: Handler = async (event) => {
           try {
             const json = JSON.parse(text)
             console.log('B&Q API returned valid JSON')
+            
+            // Parse the complex B&Q response format
+            const parsedData = parseBqResponse(json)
+            console.log('Parsed B&Q data:', parsedData.length, 'products')
+            
             return { 
               statusCode: 200, 
               headers: { 
@@ -53,7 +104,7 @@ export const handler: Handler = async (event) => {
                 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
                 'Access-Control-Allow-Headers': 'Content-Type'
               }, 
-              body: text 
+              body: JSON.stringify({ response: { docs: parsedData } })
             }
           } catch (jsonError) {
             console.log('B&Q API response is not JSON, trying next endpoint')
