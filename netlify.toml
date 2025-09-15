@@ -6,31 +6,7 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-[edge_functions]
-  directory = "netlify/edge-functions"
-
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-
-# Use Edge Function for headers
-[[edge_functions]]
-  function = "headers"
-  path = "/assets/*"
-
-[[edge_functions]]
-  function = "headers"
-  path = "/*.js"
-
-[[edge_functions]]
-  function = "headers"
-  path = "/*.css"
-
-[[edge_functions]]
-  function = "headers"
-  path = "/*.svg"
-
-[[edge_functions]]
-  function = "headers"
-  path = "/*.html"
