@@ -1,42 +1,5 @@
 import type { Handler } from '@netlify/functions'
 
-// Parse the complex B&Q API response format
-function parseBqResponse(data: any): any[] {
-  const results: any[] = []
-  
-  // B&Q returns a complex array structure, we need to find the product data
-  function findProducts(obj: any): void {
-    if (!obj || typeof obj !== 'object') return
-    
-    if (Array.isArray(obj)) {
-      for (const item of obj) {
-        if (item && typeof item === 'object') {
-          // Look for product-like objects
-          if (item.title || item.name) {
-            const product = {
-              title: item.title || item.name || 'Product',
-              url: item.url || item.detailPageUrl || item.productUrl || null,
-              imageUrl: item.image || item.imageUrl || item.thumbnail || null,
-              price: item.price || item.priceValue || null,
-            }
-            if (product.title && product.url) {
-              results.push(product)
-            }
-          }
-          findProducts(item)
-        }
-      }
-    } else {
-      for (const value of Object.values(obj)) {
-        findProducts(value)
-      }
-    }
-  }
-  
-  findProducts(data)
-  return results.slice(0, 50) // Limit to 50 results
-}
-
 export const handler: Handler = async (event) => {
   try {
     const term = (event.queryStringParameters?.term || '').toString().trim().slice(0, 64)
@@ -53,74 +16,37 @@ export const handler: Handler = async (event) => {
       }
     }
     
-    // Try different B&Q API endpoints
-    const endpoints = [
-      `https://www.diy.com/search.data?term=${encodeURIComponent(term)}&_routes=routes%2Fsearch`,
-      `https://www.diy.com/api/search?term=${encodeURIComponent(term)}`,
-      `https://www.diy.com/search.json?term=${encodeURIComponent(term)}`
-    ]
+    // Use the same approach as dev middleware - just return the raw API response
+    const apiUrl = `https://www.diy.com/search.data?term=${encodeURIComponent(term)}&_routes=routes%2Fsearch`
+    console.log('B&Q API URL:', apiUrl)
     
-    for (const apiUrl of endpoints) {
-      try {
-        console.log('Trying B&Q API:', apiUrl)
-        const resp = await fetch(apiUrl, {
-          headers: {
-            'Accept': 'application/json,text/x-script,application/json;q=0.9,*/*;q=0.8',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Referer': 'https://www.diy.com/',
-            'Accept-Language': 'en-GB,en;q=0.9',
-            'Cache-Control': 'no-cache',
-          },
-        })
-        
-        console.log('B&Q API response status:', resp.status)
-        
-        if (resp.ok) {
-          const text = await resp.text()
-          console.log('B&Q API response length:', text.length)
-          console.log('B&Q API response preview:', text.substring(0, 200))
-          
-          // Check if we got a maintenance page
-          if (text.includes('Sorry, our techies are currently working on diy.com') || 
-              text.includes('We know you\'re keen to get on with your home improvement project')) {
-            console.log('B&Q maintenance page detected, trying next endpoint')
-            continue
-          }
-          
-          // Check if we got valid JSON
-          try {
-            const json = JSON.parse(text)
-            console.log('B&Q API returned valid JSON')
-            
-            // Parse the complex B&Q response format
-            const parsedData = parseBqResponse(json)
-            console.log('Parsed B&Q data:', parsedData.length, 'products')
-            
-            return { 
-              statusCode: 200, 
-              headers: { 
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type'
-              }, 
-              body: JSON.stringify({ response: { docs: parsedData } })
-            }
-          } catch (jsonError) {
-            console.log('B&Q API response is not JSON, trying next endpoint')
-            continue
-          }
-        } else {
-          console.log('B&Q API returned error status:', resp.status)
-        }
-      } catch (fetchError) {
-        console.log('B&Q API fetch error:', fetchError)
-        continue
+    const resp = await fetch(apiUrl, {
+      headers: {
+        'Accept': 'text/x-script,application/json;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      },
+    })
+    
+    console.log('B&Q API response status:', resp.status)
+    
+    if (!resp.ok) {
+      return { 
+        statusCode: resp.status, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        },
+        body: JSON.stringify({ error: `B&Q HTTP ${resp.status}` })
       }
     }
     
-    // If all API endpoints fail, return empty results
-    console.log('All B&Q API endpoints failed')
+    const text = await resp.text()
+    console.log('B&Q API response length:', text.length)
+    
+    // Return the raw response like the dev middleware does
     return { 
       statusCode: 200, 
       headers: { 
@@ -129,7 +55,7 @@ export const handler: Handler = async (event) => {
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type'
       }, 
-      body: JSON.stringify({ response: { docs: [] } }) 
+      body: text 
     }
   } catch (e) {
     console.error('B&Q error:', e)
