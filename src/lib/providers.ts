@@ -34,9 +34,23 @@ export async function searchSingleProvider(retailer: Retailer, query: string, li
 
 async function searchBQMany(query: string, limit: number): Promise<ProviderResult[]> {
   const url = `${getApiUrl('bq')}?term=${encodeURIComponent(query)}&_routes=routes%2Fsearch`
+  console.log('B&Q API URL:', url)
   const res = await fetch(url, { headers: { 'Accept': 'text/plain' } })
-  if (!res.ok) throw new Error(`B&Q HTTP ${res.status}`)
+  console.log('B&Q Response status:', res.status)
+  if (!res.ok) {
+    console.error(`B&Q HTTP ${res.status}: ${res.statusText}`)
+    throw new Error(`B&Q HTTP ${res.status}`)
+  }
   const text = await res.text()
+  console.log('B&Q Response text length:', text.length)
+  console.log('B&Q Response preview:', text.substring(0, 200))
+
+  // Check if B&Q is down for maintenance
+  if (text.includes('Sorry, our techies are currently working on diy.com') || 
+      text.includes('We know you\'re keen to get on with your home improvement project')) {
+    console.warn('B&Q is currently down for maintenance')
+    return []
+  }
 
   // First try if middleware returned normalized docs
   try {
@@ -57,6 +71,8 @@ async function searchBQMany(query: string, limit: number): Promise<ProviderResul
       })
     }
   } catch {}
+
+  // The Netlify function now returns properly formatted JSON, so we don't need HTML parsing
 
   // Fallback: extract JSON substring from text/x-script response
   const first = text.indexOf('{')
@@ -385,5 +401,6 @@ function collectScrewfixProducts(root: any): any[] {
   visit(root)
   return results
 }
+
 
 
